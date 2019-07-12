@@ -2,11 +2,11 @@ extern crate websocket;
 
 pub mod logger;
 
+use rppal::gpio::Gpio;
+use rppal::system::DeviceInfo;
 use std::thread;
 use websocket::sync::Server;
 use websocket::OwnedMessage;
-use rppal::gpio::Gpio;
-use rppal::system::DeviceInfo;
 
 use logger::*;
 
@@ -20,8 +20,12 @@ fn main() {
     let server_addr = "127.0.0.1:2794";
     let server = Server::bind(server_addr).unwrap();
 
-    server_logger.log(LogLevel::Info, format!("Welcome to sauna on {}!\n", DeviceInfo::new().unwrap().model()));
-    server_logger.log(LogLevel::Info, format!("Server listening on {}", server_addr));
+    server_logger.info(format!(
+        "Welcome to sauna on {}!\n",
+        DeviceInfo::new().unwrap().model()
+    ));
+
+    server_logger.info(format!("Server listening on {}", server_addr));
 
     for request in server.filter_map(Result::ok) {
         thread::spawn(|| {
@@ -31,7 +35,7 @@ fn main() {
             let mut conn = request.accept().unwrap();
             let ip = conn.peer_addr().unwrap();
 
-            req_logger.log(LogLevel::Info, format!("Received connection from {}", ip));
+            req_logger.debug(format!("Received connection from {}", ip));
 
             let message = OwnedMessage::Text("Hi!".to_string());
             conn.send_message(&message).unwrap();
@@ -41,19 +45,20 @@ fn main() {
             for msg in rx.incoming_messages() {
                 match msg {
                     Err(err) => {
-                        req_logger.log(LogLevel::Info, format!("Error: {}", err));
+                        req_logger.error(format!("Error: {}", err));
                         break;
-                    },
-                    Ok(message) => {
-                        match message {
-                            OwnedMessage::Text(msg_text) => {
-                                req_logger.log(LogLevel::Info, format!("Received message from {}: '{}'", ip, msg_text));
-
-                                tx.send_message(&OwnedMessage::Text(msg_text.to_string()));
-                            },
-                            raw_msg @ _ => req_logger.log(LogLevel::Info, format!("Received non-text message: {:?}", raw_msg))
-                        }
                     }
+                    Ok(message) => match message {
+                        OwnedMessage::Text(msg_text) => {
+                            req_logger
+                                .debug(format!("Received message from {}: '{}'", ip, msg_text));
+
+                            tx.send_message(&OwnedMessage::Text(msg_text.to_string()));
+                        }
+                        raw_msg @ _ => {
+                            req_logger.debug(format!("Received non-text message: {:?}", raw_msg))
+                        }
+                    },
                 }
             }
         });
