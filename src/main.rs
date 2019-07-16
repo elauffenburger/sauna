@@ -17,15 +17,23 @@ fn make_logger<'a>(name: &'a str) -> Box<Logger> {
 fn main() {
     let mut server_logger = make_logger("sauna");
 
-    let server_addr = "127.0.0.1:2794";
-    let server = Server::bind(server_addr).unwrap();
+    let mut server_addr = String::from("");
+    for arg in std::env::args() {
+        server_addr = arg;
+    }
+
+    if server_addr.as_str() == "" {
+        server_addr = "127.0.0.1:2794".to_string();
+    }
+
+    let server = Server::bind(&server_addr).unwrap();
 
     server_logger.info(format!(
         "Welcome to sauna on {}!\n",
         DeviceInfo::new().unwrap().model()
     ));
 
-    server_logger.info(format!("Server listening on {}", server_addr));
+    server_logger.info(format!("Server listening on {}", &server_addr));
 
     for request in server.filter_map(Result::ok) {
         thread::spawn(|| {
