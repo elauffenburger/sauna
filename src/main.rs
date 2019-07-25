@@ -1,10 +1,18 @@
+extern crate serde;
+extern crate serde_json;
 extern crate websocket;
+#[macro_use]
+extern crate serde_derive;
 
 pub mod controls;
 pub mod logger;
 
 use rppal::gpio::{Gpio, Trigger};
 use rppal::system::DeviceInfo;
+use std::cell::RefCell;
+use std::io::{self, Write};
+use std::rc::Rc;
+use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Duration;
 use websocket::sync::Server;
@@ -14,6 +22,11 @@ use controls::*;
 use logger::*;
 
 const CONTROLS_POLL_RATE_MS: u64 = 100;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SaunaMessage {
+    pub t: String,
+}
 
 fn make_logger<'a>(name: &'a str) -> Box<Logger> {
     Box::new(ConsoleLogger::new(name.to_string()))
@@ -33,11 +46,7 @@ fn main() {
 
     let server = Server::bind(&server_addr).unwrap();
 
-    server_logger.info(format!(
-        "Welcome to sauna on {}!\n",
-        DeviceInfo::new().unwrap().model()
-    ));
-
+    server_logger.info(format!("Welcome to sauna!\n"));
     server_logger.info(format!("Server listening on {}", &server_addr));
 
     let gpio = Gpio::new().unwrap();
@@ -94,4 +103,8 @@ fn main() {
             thread::sleep(Duration::from_millis(CONTROLS_POLL_RATE_MS));
         }
     }
+}
+
+fn format_message(msg: SaunaMessage) -> OwnedMessage {
+    OwnedMessage::Text(serde_json::to_string(&msg).unwrap())
 }
