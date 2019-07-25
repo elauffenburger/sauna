@@ -1,14 +1,19 @@
 extern crate websocket;
 
+pub mod controls;
 pub mod logger;
 
-use rppal::gpio::Gpio;
+use rppal::gpio::{Gpio, Trigger};
 use rppal::system::DeviceInfo;
 use std::thread;
+use std::time::Duration;
 use websocket::sync::Server;
 use websocket::OwnedMessage;
 
+use controls::*;
 use logger::*;
+
+const CONTROLS_POLL_RATE_MS: u64 = 100;
 
 fn make_logger<'a>(name: &'a str) -> Box<Logger> {
     Box::new(ConsoleLogger::new(name.to_string()))
@@ -35,40 +40,58 @@ fn main() {
 
     server_logger.info(format!("Server listening on {}", &server_addr));
 
+    let gpio = Gpio::new().unwrap();
+    let mut controls = Controls::new(&gpio);
+
+    controls.up.set_interrupt(Trigger::FallingEdge);
+    controls.right.set_interrupt(Trigger::FallingEdge);
+    controls.down.set_interrupt(Trigger::FallingEdge);
+    controls.left.set_interrupt(Trigger::FallingEdge);
+    controls.button.set_interrupt(Trigger::RisingEdge);
+
     for request in server.filter_map(Result::ok) {
-        thread::spawn(|| {
-            let mut req_logger = make_logger("thread-logger");
-            let gpio = Gpio::new().unwrap();
+        let mut req_logger = make_logger("thread-logger");
 
-            let mut conn = request.accept().unwrap();
-            let ip = conn.peer_addr().unwrap();
+        let mut conn = request.accept().unwrap();
+        let ip = conn.peer_addr().unwrap();
 
-            req_logger.debug(format!("Received connection from {}", ip));
+        req_logger.debug(format!("Received connection from {}", ip));
 
-            let message = OwnedMessage::Text("Hi!".to_string());
-            conn.send_message(&message).unwrap();
+        let (mut rx, mut tx) = conn.split().unwrap();
 
-            let (mut rx, mut tx) = conn.split().unwrap();
+        loop {
+            let interrupted_pin = gpio
+                .poll_interrupts(
+                    &[
+                        &controls.up,
+                        &controls.right,
+                        &controls.down,
+                        &controls.left,
+                        &controls.button,
+                    ],
+                    true,
+                    None,
+                )
+                .unwrap();
 
-            for msg in rx.incoming_messages() {
-                match msg {
-                    Err(err) => {
-                        req_logger.error(format!("Error: {}", err));
-                        break;
+            match interrupted_pin {
+                None => {}
+                Some((pin, _)) => match Controls::get_pin_control(pin) {
+                    ControlPin::Up => {
+                        tx.send_message(&OwnedMessage::Text("nav-up".to_string()));
                     }
-                    Ok(message) => match message {
-                        OwnedMessage::Text(msg_text) => {
-                            req_logger
-                                .debug(format!("Received message from {}: '{}'", ip, msg_text));
-
-                            tx.send_message(&OwnedMessage::Text(msg_text.to_string()));
-                        }
-                        raw_msg @ _ => {
-                            req_logger.debug(format!("Received non-text message: {:?}", raw_msg))
-                        }
-                    },
-                }
+                    ControlPin::Right => {}
+                    ControlPin::Down => {
+                        tx.send_message(&OwnedMessage::Text("nav-down".to_string()));
+                    }
+                    ControlPin::Left => {}
+                    ControlPin::Button => {
+                        tx.send_message(&OwnedMessage::Text("complete-task".to_string()));
+                    }
+                },
             }
-        });
+
+            thread::sleep(Duration::from_millis(CONTROLS_POLL_RATE_MS));
+        }
     }
 }
